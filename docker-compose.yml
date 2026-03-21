@@ -1,0 +1,27 @@
+# Run the app in Docker locally (same image as Railway).
+# Requires: Docker, and a .env file with DATABASE_URL, REDIS_URL, JWT_SECRET, etc.
+#
+# Build and start:
+#   docker compose up --build
+#
+# Or build once, then run:
+#   docker compose build
+#   docker compose up
+#
+# App: http://localhost:8000
+
+services:
+  app:
+    build: .
+    ports:
+      - '8000:8000'
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - PORT=8000
+  redis:
+    image: redis:7
+    restart: always
+    ports:
+      - '6379:6379'

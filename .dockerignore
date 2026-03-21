@@ -1,0 +1,41 @@
+# Dependencies (reinstalled in image)
+node_modules
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+
+# Build output (rebuilt in image)
+dist
+build
+.next
+coverage
+
+# Git and IDE
+.git
+.gitignore
+.dockerignore
+.idea
+.vscode
+*.swp
+*.swo
+
+# Env and secrets (set at runtime)
+.env
+.env.*
+!.env.example
+
+# Logs and temp
+*.log
+.temp
+.tmp
+storage
+
+# Docs and dev (optional: keep if you want in image)
+# README.md
+# SETUP.md
+# SYSTEM_REVIEW.md
+# test/
+
+# Nixpacks (using Dockerfile now)
+nixpacks.toml
