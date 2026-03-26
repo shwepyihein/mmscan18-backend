@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsEmail,
+  IsNotEmpty,
   IsOptional,
   IsString,
   MaxLength,
@@ -94,6 +95,64 @@ export class AuthResponseDto {
     role: string;
     level: string;
   };
+}
+
+export class TelegramLoginDto {
+  @ApiProperty({
+    description: 'Telegram user ID',
+    example: '123456789',
+  })
+  @IsString()
+  @IsNotEmpty()
+  telegramId: string;
+
+  @ApiPropertyOptional({
+    description: 'Telegram username',
+    example: 'john_doe',
+  })
+  @IsString()
+  @IsOptional()
+  @MaxLength(64)
+  username?: string;
+
+  @ApiPropertyOptional({
+    description: 'Telegram first name',
+    example: 'John',
+  })
+  @IsString()
+  @IsOptional()
+  @MaxLength(128)
+  firstName?: string;
+
+  @ApiPropertyOptional({
+    description: 'Telegram last name',
+    example: 'Doe',
+  })
+  @IsString()
+  @IsOptional()
+  @MaxLength(128)
+  lastName?: string;
+}
+
+export class TelegramUserExistsDto {
+  @ApiProperty({
+    description: 'Telegram user ID',
+    example: '123456789',
+  })
+  @IsString()
+  @IsNotEmpty()
+  telegramId: string;
+}
+
+export class UserExistsResponseDto {
+  @ApiProperty({ example: true })
+  exists: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Existing user id when found',
+    example: '123e4567-e89b-12d3-a456-426614174000',
+  })
+  userId?: string;
 }
 
 export class RefreshTokenDto {

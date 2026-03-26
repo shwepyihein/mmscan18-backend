@@ -103,9 +103,7 @@ export class PublicService {
     }
 
     const transformed = this.transformManhwaUrls(manhwa);
-    const [withChapters] = await this.attachLastTwoPublishedChapters([
-      transformed,
-    ]);
+    const [withChapters] = await this.getChapterList([transformed]);
     return withChapters;
   }
 
@@ -359,6 +357,39 @@ export class PublicService {
    * For each manhwa, attach up to 2 latest **PUBLISHED** chapters (by chapterNo),
    * ordered ascending for card UI (e.g. Ch. 9, Ch. 10).
    */
+
+  private async getChapterList(
+    manhwas: Manhwa[],
+  ): Promise<PublicManhwaWithChapters[]> {
+    if (manhwas.length === 0) {
+      return [];
+    }
+
+    const chapterLists = await Promise.all(
+      manhwas.map((m) =>
+        this.chapterRepository.find({
+          where: { manhwaId: m.id, status: ChapterStatus.PUBLISHED },
+          order: { chapterNo: 'ASC' },
+          select: [
+            'id',
+            'chapterNo',
+            'title',
+            'manhwaId',
+            'status',
+            'createdAt',
+            'updatedAt',
+            'publishedAt',
+          ],
+        }),
+      ),
+    );
+
+    return manhwas.map((m, i) => ({
+      ...m,
+      chapters: chapterLists[i].slice().reverse(),
+    }));
+  }
+
   private async attachLastTwoPublishedChapters(
     manhwas: Manhwa[],
   ): Promise<PublicManhwaWithChapters[]> {

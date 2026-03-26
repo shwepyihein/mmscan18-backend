@@ -22,6 +22,9 @@ import {
   LoginDto,
   RefreshTokenDto,
   RegisterDto,
+  TelegramLoginDto,
+  TelegramUserExistsDto,
+  UserExistsResponseDto,
 } from './model/auth.dto';
 
 @ApiTags('auth')
@@ -65,6 +68,63 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
   async login(@Body() loginDto: LoginDto): Promise<AuthResponseDto> {
     return this.authService.login(loginDto);
+  }
+
+  @Post('telegram-login')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Login/register with Telegram',
+    description:
+      'Authenticate using Telegram identity. Creates a user on first login and returns JWT access/refresh tokens.',
+  })
+  @ApiBody({ type: TelegramLoginDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Telegram login successful',
+    type: AuthResponseDto,
+  })
+  @ApiResponse({ status: 401, description: 'Account is inactive' })
+  async telegramLogin(@Body() dto: TelegramLoginDto): Promise<AuthResponseDto> {
+    return this.authService.telegramLogin(dto);
+  }
+
+  @Post('telegram-register')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Register with Telegram',
+    description:
+      'Creates a new account from Telegram identity. Fails if telegramId already exists.',
+  })
+  @ApiBody({ type: TelegramLoginDto })
+  @ApiResponse({
+    status: 201,
+    description: 'Telegram registration successful',
+    type: AuthResponseDto,
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'User with this telegramId already exists',
+  })
+  async telegramRegister(@Body() dto: TelegramLoginDto): Promise<AuthResponseDto> {
+    return this.authService.telegramRegister(dto);
+  }
+
+  @Post('telegram-user-exists')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Check Telegram user existence',
+    description: 'Checks whether a user already exists by telegramId.',
+  })
+  @ApiBody({ type: TelegramUserExistsDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Existence check result',
+    type: UserExistsResponseDto,
+  })
+  async telegramUserExists(
+    @Body() dto: TelegramUserExistsDto,
+  ): Promise<UserExistsResponseDto> {
+    return this.authService.telegramUserExists(dto.telegramId);
   }
 
   @Post('refresh')
@@ -114,6 +174,21 @@ export class AuthController {
           type: 'string',
           nullable: true,
           example: 'John Doe',
+        },
+        username: {
+          type: 'string',
+          nullable: true,
+          example: 'john_doe',
+        },
+        telegramId: {
+          type: 'string',
+          nullable: true,
+          example: '123456789',
+        },
+        telegramProfileId: {
+          type: 'string',
+          nullable: true,
+          example: '123e4567-e89b-12d3-a456-426614174000',
         },
         role: {
           type: 'string',

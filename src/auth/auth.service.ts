@@ -7,11 +7,18 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
+import { randomBytes } from 'crypto';
 import { Repository } from 'typeorm';
 import { ContributorLevel } from '../common/enums/contributor-level.enum';
 import { UserRole } from '../common/enums/user-role.enum';
 import { User } from '../users/model/user.entity';
-import { AuthResponseDto, LoginDto, RegisterDto } from './model/auth.dto';
+import {
+  AuthResponseDto,
+  LoginDto,
+  RegisterDto,
+  TelegramLoginDto,
+  UserExistsResponseDto,
+} from './model/auth.dto';
 
 const REFRESH_TOKEN_EXPIRY_SEC = 7 * 24 * 60 * 60; // 7 days in seconds
 
@@ -139,6 +146,129 @@ export class AuthService {
     };
   }
 
+  async telegramLogin(dto: TelegramLoginDto): Promise<AuthResponseDto> {
+    let user = await this.userRepository.findOne({
+      where: { telegramId: dto.telegramId },
+    });
+
+    if (!user) {
+      const baseEmail = `tg_${dto.telegramId}@telegram.local`;
+      const email = await this.ensureUniqueEmail(baseEmail);
+      const username = await this.ensureUniqueUsername(
+        (dto.username || `tg_${dto.telegramId}`).trim().toLowerCase(),
+      );
+      const displayName =
+        `${dto.firstName || ''} ${dto.lastName || ''}`.trim() || null;
+      const randomPassword = randomBytes(24).toString('hex');
+      const hashedPassword = await bcrypt.hash(randomPassword, 10);
+
+      user = this.userRepository.create({
+        email,
+        password: hashedPassword,
+        name: displayName,
+        username,
+        telegramId: dto.telegramId,
+        role: UserRole.USER,
+        isActive: true,
+        level: ContributorLevel.BRONZE,
+        totalChaptersTranslated: 0,
+        totalViews: 0,
+        currentStreak: 0,
+        longestStreak: 0,
+        badges: [],
+      });
+    } else {
+      if (!user.isActive) {
+        throw new UnauthorizedException('Account is inactive');
+      }
+      if (!user.name) {
+        user.name =
+          `${dto.firstName || ''} ${dto.lastName || ''}`.trim() || null;
+      }
+      if (!user.username && dto.username) {
+        user.username = await this.ensureUniqueUsername(
+          dto.username.trim().toLowerCase(),
+        );
+      }
+    }
+
+    const savedUser = await this.userRepository.save(user);
+    const { accessToken, refreshToken } = this.buildTokens(savedUser);
+    return {
+      accessToken,
+      refreshToken,
+      user: {
+        id: savedUser.id,
+        email: savedUser.email,
+        name: savedUser.name,
+        username: savedUser.username,
+        role: savedUser.role,
+        level: savedUser.level,
+      },
+    };
+  }
+
+  async telegramRegister(dto: TelegramLoginDto): Promise<AuthResponseDto> {
+    const existing = await this.userRepository.findOne({
+      where: { telegramId: dto.telegramId },
+    });
+    if (existing) {
+      throw new ConflictException('User with this telegramId already exists');
+    }
+
+    const baseEmail = `tg_${dto.telegramId}@telegram.local`;
+    const email = await this.ensureUniqueEmail(baseEmail);
+    const username = await this.ensureUniqueUsername(
+      (dto.username || `tg_${dto.telegramId}`).trim().toLowerCase(),
+    );
+    const displayName =
+      `${dto.firstName || ''} ${dto.lastName || ''}`.trim() || null;
+    const randomPassword = randomBytes(24).toString('hex');
+    const hashedPassword = await bcrypt.hash(randomPassword, 10);
+
+    const user = this.userRepository.create({
+      email,
+      password: hashedPassword,
+      name: displayName,
+      username,
+      telegramId: dto.telegramId,
+      role: UserRole.USER,
+      isActive: true,
+      level: ContributorLevel.BRONZE,
+      totalChaptersTranslated: 0,
+      totalViews: 0,
+      currentStreak: 0,
+      longestStreak: 0,
+      badges: [],
+    });
+
+    const savedUser = await this.userRepository.save(user);
+    const { accessToken, refreshToken } = this.buildTokens(savedUser);
+    return {
+      accessToken,
+      refreshToken,
+      user: {
+        id: savedUser.id,
+        email: savedUser.email,
+        name: savedUser.name,
+        username: savedUser.username,
+        role: savedUser.role,
+        level: savedUser.level,
+      },
+    };
+  }
+
+  async telegramUserExists(telegramId: string): Promise<UserExistsResponseDto> {
+    const user = await this.userRepository.findOne({
+      where: { telegramId },
+      select: ['id'],
+    });
+    if (!user) {
+      return { exists: false };
+    }
+    return { exists: true, userId: user.id };
+  }
+
   async refresh(refreshToken: string): Promise<AuthResponseDto> {
     let payload: { sub?: string; type?: string; email?: string; role?: string };
     try {
@@ -181,6 +311,8 @@ export class AuthService {
     email: string;
     name: string | null;
     username: string | null;
+    telegramId: string | null;
+    telegramProfileId: string | null;
     role: string;
     level: string;
     totalChaptersTranslated: number;
@@ -194,6 +326,7 @@ export class AuthService {
   }> {
     const user = await this.userRepository.findOne({
       where: { id: userId, isActive: true },
+      relations: ['telegramProfile'],
     });
 
     if (!user) {
@@ -205,6 +338,8 @@ export class AuthService {
       email: user.email,
       name: user.name,
       username: user.username,
+      telegramId: user.telegramId,
+      telegramProfileId: user.telegramProfileId,
       role: user.role,
       level: user.level,
       totalChaptersTranslated: user.totalChaptersTranslated,
@@ -216,5 +351,27 @@ export class AuthService {
       updatedAt: user.updatedAt,
       avatarUrl: user.avatarUrl,
     };
+  }
+
+  private async ensureUniqueEmail(baseEmail: string): Promise<string> {
+    const existing = await this.userRepository.findOne({
+      where: { email: baseEmail },
+    });
+    if (!existing) return baseEmail;
+    return `tg_${Date.now()}_${randomBytes(4).toString('hex')}@telegram.local`;
+  }
+
+  private async ensureUniqueUsername(baseUsername: string): Promise<string> {
+    const normalized = baseUsername || `tg_${Date.now()}`;
+    let candidate = normalized;
+    let index = 1;
+    while (true) {
+      const exists = await this.userRepository.findOne({
+        where: { username: candidate },
+      });
+      if (!exists) return candidate;
+      candidate = `${normalized}_${index}`;
+      index += 1;
+    }
   }
 }
