@@ -105,7 +105,9 @@ export class AuthController {
     status: 409,
     description: 'User with this telegramId already exists',
   })
-  async telegramRegister(@Body() dto: TelegramLoginDto): Promise<AuthResponseDto> {
+  async telegramRegister(
+    @Body() dto: TelegramLoginDto,
+  ): Promise<AuthResponseDto> {
     return this.authService.telegramRegister(dto);
   }
 
@@ -194,6 +196,11 @@ export class AuthController {
           type: 'string',
           enum: ['ADMIN', 'USER'],
           example: 'USER',
+        },
+        coinBalance: {
+          type: 'number',
+          example: 100,
+          description: 'Current spendable coin balance',
         },
         isActive: {
           type: 'boolean',

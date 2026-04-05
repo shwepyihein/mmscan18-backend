@@ -179,6 +179,22 @@ export class UsersController {
     return this.usersService.update(id, updateUserDto, user.id, user.role);
   }
 
+  @Delete('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Delete my account',
+    description:
+      'Soft-deletes the authenticated user (sets isActive to false). Use after login; tokens will stop working for protected routes.',
+  })
+  @ApiResponse({ status: 204, description: 'Account deactivated successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  async deleteMyAccount(@CurrentUser('id') userId: string): Promise<void> {
+    return this.usersService.delete(userId);
+  }
+
   @Delete(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiBearerAuth('JWT-auth')

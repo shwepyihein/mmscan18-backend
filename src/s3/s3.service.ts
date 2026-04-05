@@ -111,6 +111,19 @@ export class S3Service {
     return { key, url };
   }
 
+  /** Payment proof invoice image — returns S3 object key (store in DB like avatars). */
+  async uploadCoinPaymentProof(
+    userId: string,
+    imageBuffer: Buffer,
+    mimeType: string,
+  ): Promise<{ key: string }> {
+    const extension = mimeType.split('/')[1] || 'jpg';
+    const timestamp = Date.now();
+    const key = `users/${userId}/coin-payments/invoice_${timestamp}.${extension}`;
+    await this.uploadFile(key, imageBuffer, mimeType);
+    return { key };
+  }
+
   getUserAvatarPath(userId: string): string {
     return `users/${userId}`;
   }

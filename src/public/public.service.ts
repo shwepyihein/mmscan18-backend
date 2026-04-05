@@ -10,13 +10,25 @@ import {
 import { Manhwa } from '../manhwa/model/manhwa.entity';
 import { S3Service } from '../s3/s3.service';
 import { User } from '../users/model/user.entity';
+import { WalletService } from '../wallet/wallet.service';
+
+/** Published chapter row for public manhwa payloads (cards + detail). */
+export type PublicChapterSummary = Pick<
+  Chapter,
+  | 'id'
+  | 'chapterNo'
+  | 'title'
+  | 'manhwaId'
+  | 'status'
+  | 'isLocked'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'publishedAt'
+> & { isUnlocked: boolean };
 
 /** Manhwa + last two PUBLISHED chapters (for cards / `getLastTwoChapters` on the client). */
 export type PublicManhwaWithChapters = Manhwa & {
-  chapters: Pick<
-    Chapter,
-    'id' | 'chapterNo' | 'title' | 'manhwaId' | 'status'
-  >[];
+  chapters: PublicChapterSummary[];
 };
 
 @Injectable()
@@ -29,6 +41,7 @@ export class PublicService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly s3Service: S3Service,
+    private readonly walletService: WalletService,
   ) {}
 
   // === MANHWA ===
@@ -38,6 +51,7 @@ export class PublicService {
     limit: number,
     genre?: string,
     sortBy: 'latest' | 'popular' | 'rating' = 'latest',
+    userId?: string,
   ): Promise<PaginatedResponse<PublicManhwaWithChapters>> {
     const skip = (page - 1) * limit;
 
@@ -87,13 +101,18 @@ export class PublicService {
     // Transform S3 paths to full URLs
     const transformedData = data.map((m) => this.transformManhwaUrls(m));
 
-    const withChapters =
-      await this.attachLastTwoPublishedChapters(transformedData);
+    const withChapters = await this.attachLastTwoPublishedChapters(
+      transformedData,
+      userId,
+    );
 
     return createPaginatedResponse(withChapters, total, page, limit);
   }
 
-  async getManhwaById(manhwaId: string): Promise<PublicManhwaWithChapters> {
+  async getManhwaById(
+    manhwaId: string,
+    userId?: string,
+  ): Promise<PublicManhwaWithChapters> {
     const manhwa = await this.manhwaRepository.findOne({
       where: { id: manhwaId, isActive: true },
     });
@@ -103,7 +122,7 @@ export class PublicService {
     }
 
     const transformed = this.transformManhwaUrls(manhwa);
-    const [withChapters] = await this.getChapterList([transformed]);
+    const [withChapters] = await this.getChapterList([transformed], userId);
     return withChapters;
   }
 
@@ -358,8 +377,25 @@ export class PublicService {
    * ordered ascending for card UI (e.g. Ch. 9, Ch. 10).
    */
 
+  private async enrichChaptersWithUnlockStatus<
+    T extends { id: string; isLocked: boolean },
+  >(
+    chapters: T[],
+    userId?: string,
+  ): Promise<Array<T & { isUnlocked: boolean }>> {
+    const unlockedIds = userId
+      ? new Set(await this.walletService.getUnlockedChapters(userId))
+      : null;
+
+    return chapters.map((ch) => ({
+      ...ch,
+      isUnlocked: !ch.isLocked || (unlockedIds?.has(ch.id) ?? false),
+    }));
+  }
+
   private async getChapterList(
     manhwas: Manhwa[],
+    userId?: string,
   ): Promise<PublicManhwaWithChapters[]> {
     if (manhwas.length === 0) {
       return [];
@@ -376,6 +412,7 @@ export class PublicService {
             'title',
             'manhwaId',
             'status',
+            'isLocked',
             'createdAt',
             'updatedAt',
             'publishedAt',
@@ -384,14 +421,21 @@ export class PublicService {
       ),
     );
 
+    const enriched = await Promise.all(
+      chapterLists.map((list) =>
+        this.enrichChaptersWithUnlockStatus(list, userId),
+      ),
+    );
+
     return manhwas.map((m, i) => ({
       ...m,
-      chapters: chapterLists[i].slice().reverse(),
+      chapters: enriched[i].slice().reverse(),
     }));
   }
 
   private async attachLastTwoPublishedChapters(
     manhwas: Manhwa[],
+    userId?: string,
   ): Promise<PublicManhwaWithChapters[]> {
     if (manhwas.length === 0) {
       return [];
@@ -409,6 +453,7 @@ export class PublicService {
             'title',
             'manhwaId',
             'status',
+            'isLocked',
             'createdAt',
             'updatedAt',
             'publishedAt',
@@ -417,9 +462,15 @@ export class PublicService {
       ),
     );
 
+    const enriched = await Promise.all(
+      chapterLists.map((list) =>
+        this.enrichChaptersWithUnlockStatus(list, userId),
+      ),
+    );
+
     return manhwas.map((m, i) => ({
       ...m,
-      chapters: chapterLists[i].slice().reverse(),
+      chapters: enriched[i].slice().reverse(),
     }));
   }
 

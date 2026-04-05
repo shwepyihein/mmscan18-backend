@@ -34,7 +34,7 @@ export class PublicController {
   @ApiOperation({
     summary: 'List all manhwa',
     description:
-      'Public catalog: active manhwa with at least one PUBLISHED chapter. Each item includes `chapters`: up to 2 latest PUBLISHED chapters (for cards).',
+      'Public catalog: active manhwa with at least one PUBLISHED chapter. Each item includes `chapters`: up to 2 latest PUBLISHED chapters (for cards), each with `isLocked` and `isUnlocked` (send Bearer token to resolve unlocks for the current user).',
   })
   @ApiQuery({ name: 'page', required: true, type: Number })
   @ApiQuery({ name: 'limit', required: true, type: Number })
@@ -47,26 +47,40 @@ export class PublicController {
       '`latest` = by most recent PUBLISHED chapter `publishedAt` (default). `popular` = totalViews. `rating` = manhwa rating.',
   })
   @ApiResponse({ status: 200, description: 'List of manhwa' })
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   async listManhwa(
     @Query('page') page: number,
     @Query('limit') limit: number,
     @Query('genre') genre?: string,
     @Query('sortBy') sortBy?: 'latest' | 'popular' | 'rating',
+    @CurrentUser() user?: { id?: string },
   ) {
-    return this.publicService.listManhwa(+page, +limit, genre, sortBy);
+    return this.publicService.listManhwa(
+      +page,
+      +limit,
+      genre,
+      sortBy,
+      user?.id,
+    );
   }
 
   @Get('manhwa/:id')
   @ApiOperation({
     summary: 'Get manhwa details',
     description:
-      'Get details of a specific manhwa. Includes `chapters`: up to 2 latest PUBLISHED chapters.',
+      'Get details of a specific manhwa. Includes `chapters`: up to 2 latest PUBLISHED chapters. Each chapter has `isLocked` and `isUnlocked` (when Bearer token is sent, unlocks are resolved for the current user).',
   })
   @ApiParam({ name: 'id', description: 'Manhwa UUID' })
   @ApiResponse({ status: 200, description: 'Manhwa details' })
   @ApiResponse({ status: 404, description: 'Manhwa not found' })
-  async getManhwa(@Param('id') id: string) {
-    return this.publicService.getManhwaById(id);
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  async getManhwa(
+    @Param('id') id: string,
+    @CurrentUser() user?: { id?: string },
+  ) {
+    return this.publicService.getManhwaById(id, user?.id);
   }
 
   @Get('manhwa/:manhwaId/chapters/:chapterNo')

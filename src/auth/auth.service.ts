@@ -315,6 +315,7 @@ export class AuthService {
     telegramProfileId: string | null;
     role: string;
     level: string;
+    coinBalance: number;
     totalChaptersTranslated: number;
     totalViews: number;
     currentStreak: number;
@@ -342,6 +343,7 @@ export class AuthService {
       telegramProfileId: user.telegramProfileId,
       role: user.role,
       level: user.level,
+      coinBalance: user.coinBalance,
       totalChaptersTranslated: user.totalChaptersTranslated,
       totalViews: user.totalViews,
       currentStreak: user.currentStreak,

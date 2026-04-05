@@ -5,9 +5,18 @@ import {
   Param,
   Patch,
   Post,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -16,6 +25,7 @@ import { UserRole } from '../common/enums/user-role.enum';
 import {
   ApproveCoinRequestDto,
   CreateCoinRequestDto,
+  CreatePackageCoinRequestDto,
   UnlockChapterDto,
   WalletStatusResponse,
 } from './dto/wallet.dto';
@@ -49,6 +59,45 @@ export class WalletController {
     @Body() dto: CreateCoinRequestDto,
   ): Promise<CoinRequest> {
     return this.walletService.createCoinRequest(userId, dto);
+  }
+
+  @Post('purchase-request')
+  @UseInterceptors(FileInterceptor('invoice'))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary:
+      'Create a coin purchase request from a catalog package (upload payment invoice)',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['invoice', 'coinPackageId', 'currency', 'priceAmount'],
+      properties: {
+        invoice: {
+          type: 'string',
+          format: 'binary',
+          description: 'Payment proof image (jpg, png, webp, gif). Max 5MB.',
+        },
+        coinPackageId: { type: 'string', format: 'uuid' },
+        currency: {
+          type: 'string',
+          example: 'USD',
+          description: 'ISO 4217 (must match package)',
+        },
+        priceAmount: {
+          type: 'string',
+          example: '4.99',
+          description: 'Must match package price for this currency',
+        },
+      },
+    },
+  })
+  createPurchaseRequest(
+    @CurrentUser('id') userId: string,
+    @Body() dto: CreatePackageCoinRequestDto,
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<CoinRequest> {
+    return this.walletService.createPurchaseRequest(userId, dto, file);
   }
 
   @Get('my-requests')

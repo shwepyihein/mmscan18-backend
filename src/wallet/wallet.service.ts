@@ -6,16 +6,37 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
+import { CoinPackage } from '../coin-packages/model/coin-package.entity';
 import { Chapter } from '../chapter/model/chapter.entity';
+import { S3Service } from '../s3/s3.service';
 import { User } from '../users/model/user.entity';
 import {
   ApproveCoinRequestDto,
   CreateCoinRequestDto,
+  CreatePackageCoinRequestDto,
   UnlockChapterDto,
   WalletStatusResponse,
 } from './dto/wallet.dto';
 import { ChapterUnlock } from './model/chapter-unlock.entity';
 import { CoinRequest, CoinRequestStatus } from './model/coin-request.entity';
+
+const ALLOWED_PAYMENT_PROOF_MIME = [
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+];
+
+const MAX_PAYMENT_PROOF_SIZE = 5 * 1024 * 1024; // 5MB (same as avatars)
+
+function fiatMinorUnits(value: string): number {
+  const n = Number.parseFloat(value.trim());
+  if (Number.isNaN(n)) {
+    throw new BadRequestException('Invalid price amount');
+  }
+  return Math.round(n * 100);
+}
 
 @Injectable()
 export class WalletService {
@@ -28,7 +49,10 @@ export class WalletService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(Chapter)
     private readonly chapterRepository: Repository<Chapter>,
+    @InjectRepository(CoinPackage)
+    private readonly coinPackageRepository: Repository<CoinPackage>,
     private readonly dataSource: DataSource,
+    private readonly s3Service: S3Service,
   ) {}
 
   async getWalletStatus(userId: string): Promise<WalletStatusResponse> {
@@ -65,6 +89,86 @@ export class WalletService {
     return this.coinRequestRepository.save(request);
   }
 
+  async createPurchaseRequest(
+    userId: string,
+    dto: CreatePackageCoinRequestDto,
+    file: Express.Multer.File,
+  ): Promise<CoinRequest> {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('Invoice image is required');
+    }
+
+    if (!ALLOWED_PAYMENT_PROOF_MIME.includes(file.mimetype)) {
+      throw new BadRequestException(
+        `Invalid file type. Allowed types: ${ALLOWED_PAYMENT_PROOF_MIME.join(', ')}`,
+      );
+    }
+
+    if (file.size > MAX_PAYMENT_PROOF_SIZE) {
+      throw new BadRequestException(
+        `File too large. Maximum size is ${MAX_PAYMENT_PROOF_SIZE / (1024 * 1024)}MB`,
+      );
+    }
+
+    const pkg = await this.coinPackageRepository.findOne({
+      where: { id: dto.coinPackageId },
+    });
+
+    if (!pkg) {
+      throw new NotFoundException('Coin package not found');
+    }
+
+    if (!pkg.isActive) {
+      throw new BadRequestException(
+        'Coin package is not available for purchase',
+      );
+    }
+
+    const pkgCurrency = pkg.currency.trim().toUpperCase();
+    if (pkgCurrency !== dto.currency) {
+      throw new BadRequestException(
+        'Currency does not match the selected package',
+      );
+    }
+
+    if (fiatMinorUnits(pkg.price) !== fiatMinorUnits(dto.priceAmount)) {
+      throw new BadRequestException(
+        'Price does not match the selected package',
+      );
+    }
+
+    const { key } = await this.s3Service.uploadCoinPaymentProof(
+      userId,
+      file.buffer,
+      file.mimetype,
+    );
+
+    const priceSnapshot = (fiatMinorUnits(dto.priceAmount) / 100).toFixed(2);
+
+    const request = this.coinRequestRepository.create({
+      userId,
+      amount: pkg.coins,
+      coinPackageId: pkg.id,
+      currency: dto.currency,
+      priceAmount: priceSnapshot,
+      proofImageUrl: key,
+      status: CoinRequestStatus.PENDING,
+    });
+
+    const saved = await this.coinRequestRepository.save(request);
+
+    const withPackage = await this.coinRequestRepository.findOne({
+      where: { id: saved.id },
+      relations: ['coinPackage'],
+    });
+
+    if (!withPackage) {
+      throw new NotFoundException('Coin request not found after save');
+    }
+
+    return withPackage;
+  }
+
   async getMyRequests(userId: string): Promise<CoinRequest[]> {
     return this.coinRequestRepository.find({
       where: { userId },
@@ -76,7 +180,7 @@ export class WalletService {
   async getAllPendingRequests(): Promise<CoinRequest[]> {
     return this.coinRequestRepository.find({
       where: { status: CoinRequestStatus.PENDING },
-      relations: ['user'],
+      relations: ['user', 'coinPackage'],
       order: { createdAt: 'ASC' },
     });
   }
@@ -161,7 +265,9 @@ export class WalletService {
         where: { userId, chapterId: dto.chapterId },
       });
       if (existingUnlock) {
-        throw new ConflictException('Chapter is already unlocked for this user');
+        throw new ConflictException(
+          'Chapter is already unlocked for this user',
+        );
       }
 
       if (user.coinBalance < chapter.coinPrice) {

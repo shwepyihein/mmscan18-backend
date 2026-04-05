@@ -857,8 +857,8 @@ export class CrawlService implements OnModuleInit {
         manhwaId: manhwa.id,
         title: manhwa.title,
         sourceUrl: manhwa.sourceUrl,
-        lastCrawledChapter: manhwa.lastCrawledChapter,
-        nextChapterToCrawl: manhwa.lastCrawledChapter + 1,
+        lastCrawledChapter: manhwa.totalChapters,
+        nextChapterToCrawl: manhwa.totalChapters + 1,
         crawlEnabled: manhwa.crawlEnabled,
         lastTask: lastTask ? this.mapTaskToResponse(lastTask) : null,
       });

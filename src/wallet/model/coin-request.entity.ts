@@ -8,6 +8,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { CoinPackage } from '../../coin-packages/model/coin-package.entity';
 import { User } from '../../users/model/user.entity';
 
 export enum CoinRequestStatus {
@@ -32,6 +33,30 @@ export class CoinRequest {
   @ApiProperty({ description: 'Amount of coins requested' })
   @Column({ type: 'int' })
   amount: number;
+
+  @ApiPropertyOptional({
+    description: 'Coin package id when purchase is tied to a catalog package',
+  })
+  @Column({ type: 'uuid', nullable: true })
+  coinPackageId: string | null;
+
+  @ManyToOne(() => CoinPackage, { nullable: true })
+  @JoinColumn({ name: 'coinPackageId' })
+  coinPackage: CoinPackage | null;
+
+  @ApiPropertyOptional({
+    description: 'ISO 4217 currency snapshot at purchase time',
+    example: 'USD',
+  })
+  @Column({ type: 'varchar', length: 3, nullable: true })
+  currency: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Fiat amount snapshot at purchase time (major units)',
+    example: '4.99',
+  })
+  @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
+  priceAmount: string | null;
 
   @ApiProperty({
     description: 'Status of the request',
