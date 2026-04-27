@@ -2,15 +2,19 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
+import axios from 'axios';
 import { DataSource, Repository } from 'typeorm';
-import { CoinPackage } from '../coin-packages/model/coin-package.entity';
 import { Chapter } from '../chapter/model/chapter.entity';
+import { CoinPackage } from '../coin-packages/model/coin-package.entity';
 import { S3Service } from '../s3/s3.service';
 import { User } from '../users/model/user.entity';
 import {
+  AdminUpdatePendingRequestDto,
   ApproveCoinRequestDto,
   CreateCoinRequestDto,
   CreatePackageCoinRequestDto,
@@ -40,6 +44,8 @@ function fiatMinorUnits(value: string): number {
 
 @Injectable()
 export class WalletService {
+  private readonly logger = new Logger(WalletService.name);
+
   constructor(
     @InjectRepository(CoinRequest)
     private readonly coinRequestRepository: Repository<CoinRequest>,
@@ -53,7 +59,52 @@ export class WalletService {
     private readonly coinPackageRepository: Repository<CoinPackage>,
     private readonly dataSource: DataSource,
     private readonly s3Service: S3Service,
+    private readonly configService: ConfigService,
   ) {}
+
+  private withProofImageUrl(request: CoinRequest | null): CoinRequest | null {
+    if (!request) {
+      return null;
+    }
+    return {
+      ...request,
+      proofImageUrl: this.s3Service.getFullUrl(request.proofImageUrl),
+    };
+  }
+
+  private async notifyTelegramPurchaseRequest(
+    request: CoinRequest,
+  ): Promise<void> {
+    const botToken = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
+    const chatId = this.configService.get<string>('TELEGRAM_APPROVAL_CHAT_ID');
+
+    if (!botToken || !chatId) {
+      return;
+    }
+
+    const proofUrl = this.s3Service.getFullUrl(request.proofImageUrl);
+    const lines = [
+      'New coin purchase request',
+      `Request ID: ${request.id}`,
+      `User ID: ${request.userId}`,
+      `Coins: ${request.amount}`,
+      `Package ID: ${request.coinPackageId ?? '-'}`,
+      `Currency: ${request.currency ?? '-'}`,
+      `Price: ${request.priceAmount ?? '-'}`,
+      `Status: ${request.status}`,
+      `Proof: ${proofUrl ?? '-'}`,
+    ];
+
+    try {
+      await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        chat_id: chatId,
+        text: lines.join('\n'),
+      });
+    } catch (error) {
+      this.logger.warn('Failed to send Telegram purchase notification');
+      this.logger.debug(String(error));
+    }
+  }
 
   async getWalletStatus(userId: string): Promise<WalletStatusResponse> {
     const user = await this.userRepository.findOne({
@@ -86,7 +137,8 @@ export class WalletService {
       status: CoinRequestStatus.PENDING,
     });
 
-    return this.coinRequestRepository.save(request);
+    const saved = await this.coinRequestRepository.save(request);
+    return this.withProofImageUrl(saved) as CoinRequest;
   }
 
   async createPurchaseRequest(
@@ -166,23 +218,108 @@ export class WalletService {
       throw new NotFoundException('Coin request not found after save');
     }
 
-    return withPackage;
+    await this.notifyTelegramPurchaseRequest(withPackage);
+    return this.withProofImageUrl(withPackage) as CoinRequest;
   }
 
   async getMyRequests(userId: string): Promise<CoinRequest[]> {
-    return this.coinRequestRepository.find({
+    const requests = await this.coinRequestRepository.find({
       where: { userId },
       order: { createdAt: 'DESC' },
     });
+    return requests.map(
+      (request) => this.withProofImageUrl(request) as CoinRequest,
+    );
   }
 
   // Admin: Get all pending requests
   async getAllPendingRequests(): Promise<CoinRequest[]> {
-    return this.coinRequestRepository.find({
+    const requests = await this.coinRequestRepository.find({
       where: { status: CoinRequestStatus.PENDING },
       relations: ['user', 'coinPackage'],
       order: { createdAt: 'ASC' },
     });
+    return requests.map(
+      (request) => this.withProofImageUrl(request) as CoinRequest,
+    );
+  }
+
+  // Admin: Get all requests (optionally filter by status)
+  async getAllRequests(status?: CoinRequestStatus): Promise<CoinRequest[]> {
+    const requests = await this.coinRequestRepository.find({
+      where: status ? { status } : {},
+      relations: ['user', 'coinPackage'],
+      order: { createdAt: 'DESC' },
+    });
+    return requests.map(
+      (request) => this.withProofImageUrl(request) as CoinRequest,
+    );
+  }
+
+  // Admin: Edit pending request package/snapshot before approval
+  async updatePendingRequest(
+    requestId: string,
+    dto: AdminUpdatePendingRequestDto,
+  ): Promise<CoinRequest> {
+    const request = await this.coinRequestRepository.findOne({
+      where: { id: requestId },
+      relations: ['coinPackage'],
+    });
+
+    if (!request) {
+      throw new NotFoundException('Request not found');
+    }
+
+    if (request.status !== CoinRequestStatus.PENDING) {
+      throw new BadRequestException('Only pending requests can be edited');
+    }
+
+    const targetPackageId = dto.coinPackageId ?? request.coinPackageId;
+    if (!targetPackageId) {
+      throw new BadRequestException(
+        'coinPackageId is required for package-based request edits',
+      );
+    }
+
+    const pkg = await this.coinPackageRepository.findOne({
+      where: { id: targetPackageId },
+    });
+
+    if (!pkg) {
+      throw new NotFoundException('Coin package not found');
+    }
+
+    if (!pkg.isActive) {
+      throw new BadRequestException('Selected package is inactive');
+    }
+
+    const currency = (dto.currency ?? request.currency ?? pkg.currency)
+      .trim()
+      .toUpperCase();
+    const priceAmount = dto.priceAmount ?? request.priceAmount ?? pkg.price;
+
+    if (currency !== pkg.currency.trim().toUpperCase()) {
+      throw new BadRequestException(
+        'Currency does not match the selected package',
+      );
+    }
+
+    if (fiatMinorUnits(priceAmount) !== fiatMinorUnits(pkg.price)) {
+      throw new BadRequestException(
+        'Price does not match the selected package',
+      );
+    }
+
+    request.coinPackageId = pkg.id;
+    request.amount = pkg.coins;
+    request.currency = currency;
+    request.priceAmount = (fiatMinorUnits(priceAmount) / 100).toFixed(2);
+    if (dto.adminNote) {
+      request.adminNote = dto.adminNote;
+    }
+
+    const saved = await this.coinRequestRepository.save(request);
+    return this.withProofImageUrl(saved) as CoinRequest;
   }
 
   // Admin: Approve request
@@ -214,7 +351,7 @@ export class WalletService {
       await manager.save(request);
       await manager.save(user);
 
-      return request;
+      return this.withProofImageUrl(request) as CoinRequest;
     });
   }
 
@@ -238,7 +375,8 @@ export class WalletService {
     request.status = CoinRequestStatus.REJECTED;
     request.adminNote = dto.adminNote || 'Rejected by admin';
 
-    return this.coinRequestRepository.save(request);
+    const saved = await this.coinRequestRepository.save(request);
+    return this.withProofImageUrl(saved) as CoinRequest;
   }
 
   // User: Unlock chapter
@@ -295,6 +433,27 @@ export class WalletService {
       select: ['chapterId'],
     });
     return unlocks.map((u) => u.chapterId);
+  }
+
+  async getChapterUnlockStatus(
+    userId: string,
+    chapterId: string,
+  ): Promise<{ chapterId: string; isLocked: boolean; isUnlocked: boolean }> {
+    const chapter = await this.chapterRepository.findOne({
+      where: { id: chapterId },
+      select: ['id', 'isLocked'],
+    });
+
+    if (!chapter) {
+      throw new NotFoundException('Chapter not found');
+    }
+
+    if (!chapter.isLocked) {
+      return { chapterId, isLocked: false, isUnlocked: true };
+    }
+
+    const isUnlocked = await this.isChapterUnlocked(userId, chapterId);
+    return { chapterId, isLocked: true, isUnlocked };
   }
 
   async isChapterUnlocked(userId: string, chapterId: string): Promise<boolean> {

@@ -82,9 +82,9 @@ export class Chapter {
 
   @ApiProperty({
     description: 'Price in coins to unlock the chapter',
-    example: 10,
+    example: 5,
   })
-  @Column({ type: 'int', default: 0 })
+  @Column({ type: 'int', default: 5 })
   coinPrice: number;
 
   @ApiProperty({

@@ -335,6 +335,21 @@ export class UpdateManhwaDto {
   status?: ManhwaStatus;
 }
 
+export class SetChapterLockDto {
+  @ApiProperty({
+    description: 'Set lock state: true=locked, false=unlocked',
+    example: true,
+  })
+  @IsBoolean()
+  @Transform(({ value }: { value: unknown }) => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    if (typeof value === 'boolean') return value;
+    return undefined;
+  })
+  isLocked: boolean;
+}
+
 // Predefined genres for reference
 export const MANHWA_GENRES = [
   'action',

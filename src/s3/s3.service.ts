@@ -179,7 +179,9 @@ export class S3Service {
             (url) =>
               url.endsWith('.webp') ||
               url.endsWith('.jpg') ||
-              url.endsWith('.png'),
+              url.endsWith('.jpeg') ||
+              url.endsWith('.png') ||
+              url.endsWith('.gif'),
           )
           .sort() || [];
 

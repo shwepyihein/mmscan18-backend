@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { Chapter } from '../chapter/model/chapter.entity';
 import { S3Service } from '../s3/s3.service';
 import { ManhwaStatus } from './model/manhwa-status.enum';
 import { CreateManhwaDto, UpdateManhwaDto } from './model/manhwa.dto';
@@ -19,6 +20,8 @@ export class ManhwaService {
   constructor(
     @InjectRepository(Manhwa)
     private readonly manhwaRepository: Repository<Manhwa>,
+    @InjectRepository(Chapter)
+    private readonly chapterRepository: Repository<Chapter>,
     private readonly s3Service: S3Service,
   ) {}
 
@@ -226,6 +229,45 @@ export class ManhwaService {
     }
 
     return Array.from(genresSet).sort();
+  }
+
+  async setAllChaptersLock(
+    manhwaId: string,
+    isLocked: boolean,
+  ): Promise<{ manhwaId: string; isLocked: boolean; updatedCount: number }> {
+    await this.findByIdRaw(manhwaId);
+
+    const result = await this.chapterRepository.update(
+      { manhwaId },
+      { isLocked },
+    );
+    return {
+      manhwaId,
+      isLocked,
+      updatedCount: result.affected ?? 0,
+    };
+  }
+
+  async setSingleChapterLock(
+    manhwaId: string,
+    chapterId: string,
+    isLocked: boolean,
+  ): Promise<{ manhwaId: string; chapterId: string; isLocked: boolean }> {
+    await this.findByIdRaw(manhwaId);
+
+    const chapter = await this.chapterRepository.findOne({
+      where: { id: chapterId, manhwaId },
+      select: ['id'],
+    });
+    if (!chapter) {
+      throw new NotFoundException('Chapter not found for this manhwa');
+    }
+
+    await this.chapterRepository.update(
+      { id: chapterId, manhwaId },
+      { isLocked },
+    );
+    return { manhwaId, chapterId, isLocked };
   }
 
   // Transform S3 paths to full URLs for response

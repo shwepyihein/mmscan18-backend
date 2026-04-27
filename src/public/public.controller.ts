@@ -34,7 +34,7 @@ export class PublicController {
   @ApiOperation({
     summary: 'List all manhwa',
     description:
-      'Public catalog: active manhwa with at least one PUBLISHED chapter. Each item includes `chapters`: up to 2 latest PUBLISHED chapters (for cards), each with `isLocked` and `isUnlocked` (send Bearer token to resolve unlocks for the current user).',
+      'Public catalog: active manhwa with at least one PUBLISHED chapter. Each item includes `chapters`: up to 2 latest PUBLISHED chapters (for cards), each with effective `isLocked` (send Bearer token to resolve unlocks for the current user).',
   })
   @ApiQuery({ name: 'page', required: true, type: Number })
   @ApiQuery({ name: 'limit', required: true, type: Number })
@@ -69,7 +69,7 @@ export class PublicController {
   @ApiOperation({
     summary: 'Get manhwa details',
     description:
-      'Get details of a specific manhwa. Includes `chapters`: up to 2 latest PUBLISHED chapters. Each chapter has `isLocked` and `isUnlocked` (when Bearer token is sent, unlocks are resolved for the current user).',
+      'Get details of a specific manhwa. Includes `chapters`: up to 2 latest PUBLISHED chapters. Each chapter has effective `isLocked` (when Bearer token is sent, unlocks are resolved for the current user).',
   })
   @ApiParam({ name: 'id', description: 'Manhwa UUID' })
   @ApiResponse({ status: 200, description: 'Manhwa details' })
@@ -89,7 +89,7 @@ export class PublicController {
   @ApiOperation({
     summary: 'Get chapter for reading by number',
     description:
-      'Get chapter content by manhwaId and chapterNo. Checks if chapter is locked and if user has unlocked it.',
+      'Get chapter content by manhwaId and chapterNo. Guarded endpoint: if chapter is locked and not unlocked by current user, returns 403 Locked.',
   })
   @ApiParam({ name: 'manhwaId', description: 'Manhwa UUID' })
   @ApiParam({ name: 'chapterNo', description: 'Chapter number' })
@@ -114,20 +114,16 @@ export class PublicController {
 
     if (chapter.isLocked) {
       if (!userId) {
-        throw new ForbiddenException(
-          'This chapter is locked. Please login and unlock it with coins.',
-        );
+        throw new ForbiddenException('Locked');
       }
 
-      const isUnlocked = await this.walletService.isChapterUnlocked(
+      const unlockStatus = await this.walletService.getChapterUnlockStatus(
         userId,
         chapter.id,
       );
 
-      if (!isUnlocked) {
-        throw new ForbiddenException(
-          'This chapter is locked. You need to unlock it with coins before reading.',
-        );
+      if (!unlockStatus.isUnlocked) {
+        throw new ForbiddenException('Locked');
       }
     }
 
@@ -153,7 +149,9 @@ export class PublicController {
 
     return chapters.map((chapter) => ({
       ...chapter,
-      isUnlocked: !chapter.isLocked || unlockedChapterIds.includes(chapter.id),
+      isLocked: chapter.isLocked
+        ? !unlockedChapterIds.includes(chapter.id)
+        : false,
     }));
   }
 

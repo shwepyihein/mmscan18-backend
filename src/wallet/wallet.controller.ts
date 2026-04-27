@@ -5,6 +5,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -15,6 +16,7 @@ import {
   ApiBody,
   ApiConsumes,
   ApiOperation,
+  ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -23,6 +25,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { UserRole } from '../common/enums/user-role.enum';
 import {
+  AdminUpdatePendingRequestDto,
   ApproveCoinRequestDto,
   CreateCoinRequestDto,
   CreatePackageCoinRequestDto,
@@ -30,7 +33,7 @@ import {
   WalletStatusResponse,
 } from './dto/wallet.dto';
 import { ChapterUnlock } from './model/chapter-unlock.entity';
-import { CoinRequest } from './model/coin-request.entity';
+import { CoinRequest, CoinRequestStatus } from './model/coin-request.entity';
 import { WalletService } from './wallet.service';
 
 @ApiTags('wallet')
@@ -121,6 +124,17 @@ export class WalletController {
     return this.walletService.getUnlockedChapters(userId);
   }
 
+  @Get('chapters/:chapterId/unlock-status')
+  @ApiOperation({
+    summary: 'Check if a chapter is unlocked for current user',
+  })
+  getChapterUnlockStatus(
+    @CurrentUser('id') userId: string,
+    @Param('chapterId') chapterId: string,
+  ): Promise<{ chapterId: string; isLocked: boolean; isUnlocked: boolean }> {
+    return this.walletService.getChapterUnlockStatus(userId, chapterId);
+  }
+
   // Admin Endpoints
 
   @Get('admin/pending-requests')
@@ -128,6 +142,23 @@ export class WalletController {
   @ApiOperation({ summary: 'Admin: Get all pending coin requests' })
   getAllPendingRequests(): Promise<CoinRequest[]> {
     return this.walletService.getAllPendingRequests();
+  }
+
+  @Get('admin/requests')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Admin: Get all coin payment requests (optional status filter)',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: CoinRequestStatus,
+    description: 'Filter by request status',
+  })
+  getAllRequests(
+    @Query('status') status?: CoinRequestStatus,
+  ): Promise<CoinRequest[]> {
+    return this.walletService.getAllRequests(status);
   }
 
   @Patch('admin/requests/:id/approve')
@@ -138,6 +169,19 @@ export class WalletController {
     @Body() dto: ApproveCoinRequestDto,
   ): Promise<CoinRequest> {
     return this.walletService.approveRequest(requestId, dto);
+  }
+
+  @Patch('admin/requests/:id')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary:
+      'Admin: Update pending request package/amount snapshot after checking invoice',
+  })
+  updatePendingRequest(
+    @Param('id') requestId: string,
+    @Body() dto: AdminUpdatePendingRequestDto,
+  ): Promise<CoinRequest> {
+    return this.walletService.updatePendingRequest(requestId, dto);
   }
 
   @Patch('admin/requests/:id/reject')

@@ -31,6 +31,7 @@ import { ManhwaService } from './manhwa.service';
 import {
   CreateManhwaDto,
   MANHWA_GENRES,
+  SetChapterLockDto,
   UpdateManhwaDto,
 } from './model/manhwa.dto';
 
@@ -348,5 +349,53 @@ export class ManhwaController {
   @ApiResponse({ status: 404, description: 'Manhwa not found' })
   async deleteManhwa(@Param('id') id: string) {
     return this.manhwaService.delete(id);
+  }
+
+  @Put(':id/chapters/lock')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
+  @ApiOperation({
+    summary: 'Set lock/unlock for all chapters of a manhwa',
+    description:
+      'Updates isLocked for all chapters under the given manhwa based on body.isLocked.',
+  })
+  @ApiParam({ name: 'id', description: 'Manhwa UUID' })
+  @ApiBody({ type: SetChapterLockDto })
+  @ApiResponse({
+    status: 200,
+    description: 'All chapters updated',
+  })
+  setAllChaptersLock(
+    @Param('id') manhwaId: string,
+    @Body() body: SetChapterLockDto,
+  ) {
+    return this.manhwaService.setAllChaptersLock(manhwaId, body.isLocked);
+  }
+
+  @Put(':id/chapters/:chapterId/lock')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
+  @ApiOperation({
+    summary: 'Set lock/unlock for a single chapter',
+    description:
+      'Updates isLocked for one chapter under the given manhwa based on body.isLocked.',
+  })
+  @ApiParam({ name: 'id', description: 'Manhwa UUID' })
+  @ApiParam({ name: 'chapterId', description: 'Chapter UUID' })
+  @ApiBody({ type: SetChapterLockDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Chapter lock status updated',
+  })
+  setSingleChapterLock(
+    @Param('id') manhwaId: string,
+    @Param('chapterId') chapterId: string,
+    @Body() body: SetChapterLockDto,
+  ) {
+    return this.manhwaService.setSingleChapterLock(
+      manhwaId,
+      chapterId,
+      body.isLocked,
+    );
   }
 }

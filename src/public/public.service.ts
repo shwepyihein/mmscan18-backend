@@ -24,7 +24,7 @@ export type PublicChapterSummary = Pick<
   | 'createdAt'
   | 'updatedAt'
   | 'publishedAt'
-> & { isUnlocked: boolean };
+>;
 
 /** Manhwa + last two PUBLISHED chapters (for cards / `getLastTwoChapters` on the client). */
 export type PublicManhwaWithChapters = Manhwa & {
@@ -235,19 +235,25 @@ export class PublicService {
       }
     }
 
+    const mmJsonKey =
+      chapter.mmJsonPath ||
+      (chapter.s3BasePath ? `${chapter.s3BasePath}/mm.json` : '');
     let mmJson: unknown = null;
-    if (chapter.mmJsonPath) {
+    if (mmJsonKey) {
       try {
-        mmJson = await this.s3Service.getJsonFile(chapter.mmJsonPath);
+        mmJson = await this.s3Service.getJsonFile(mmJsonKey);
       } catch (error) {
         console.error(`Failed to get mm.json: ${error}`);
       }
     }
 
+    const enJsonKey =
+      chapter.enJsonPath ||
+      (chapter.s3BasePath ? `${chapter.s3BasePath}/en.json` : '');
     let enJson: unknown = null;
-    if (chapter.enJsonPath) {
+    if (enJsonKey) {
       try {
-        enJson = await this.s3Service.getJsonFile(chapter.enJsonPath);
+        enJson = await this.s3Service.getJsonFile(enJsonKey);
       } catch (error) {
         console.error(`Failed to get en.json: ${error}`);
       }
@@ -377,19 +383,16 @@ export class PublicService {
    * ordered ascending for card UI (e.g. Ch. 9, Ch. 10).
    */
 
-  private async enrichChaptersWithUnlockStatus<
+  private async resolveChapterLockState<
     T extends { id: string; isLocked: boolean },
-  >(
-    chapters: T[],
-    userId?: string,
-  ): Promise<Array<T & { isUnlocked: boolean }>> {
+  >(chapters: T[], userId?: string): Promise<T[]> {
     const unlockedIds = userId
       ? new Set(await this.walletService.getUnlockedChapters(userId))
       : null;
 
     return chapters.map((ch) => ({
       ...ch,
-      isUnlocked: !ch.isLocked || (unlockedIds?.has(ch.id) ?? false),
+      isLocked: ch.isLocked ? !(unlockedIds?.has(ch.id) ?? false) : false,
     }));
   }
 
@@ -422,9 +425,7 @@ export class PublicService {
     );
 
     const enriched = await Promise.all(
-      chapterLists.map((list) =>
-        this.enrichChaptersWithUnlockStatus(list, userId),
-      ),
+      chapterLists.map((list) => this.resolveChapterLockState(list, userId)),
     );
 
     return manhwas.map((m, i) => ({
@@ -463,9 +464,7 @@ export class PublicService {
     );
 
     const enriched = await Promise.all(
-      chapterLists.map((list) =>
-        this.enrichChaptersWithUnlockStatus(list, userId),
-      ),
+      chapterLists.map((list) => this.resolveChapterLockState(list, userId)),
     );
 
     return manhwas.map((m, i) => ({

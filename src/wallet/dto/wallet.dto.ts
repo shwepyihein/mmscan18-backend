@@ -71,6 +71,49 @@ export class ApproveCoinRequestDto {
   adminNote?: string;
 }
 
+export class AdminUpdatePendingRequestDto {
+  @ApiPropertyOptional({
+    description: 'Replace with another active coin package',
+    format: 'uuid',
+  })
+  @IsUUID()
+  @IsOptional()
+  coinPackageId?: string;
+
+  @ApiPropertyOptional({
+    example: 'USD',
+    description: 'Currency snapshot (must match selected package)',
+  })
+  @IsString()
+  @Length(3, 3)
+  @Transform(({ value }: { value: unknown }): string => {
+    if (typeof value === 'string') {
+      return value.trim().toUpperCase();
+    }
+    return '';
+  })
+  @IsOptional()
+  currency?: string;
+
+  @ApiPropertyOptional({
+    example: '4.99',
+    description: 'Price snapshot (must match selected package price)',
+  })
+  @IsString()
+  @Matches(/^\d+(\.\d{1,2})?$/, {
+    message: 'priceAmount must be a decimal with at most 2 fractional digits',
+  })
+  @IsOptional()
+  priceAmount?: string;
+
+  @ApiPropertyOptional({
+    description: 'Optional admin note while adjusting pending request',
+  })
+  @IsString()
+  @IsOptional()
+  adminNote?: string;
+}
+
 export class UnlockChapterDto {
   @ApiProperty({ description: 'Chapter UUID to unlock' })
   @IsUUID()

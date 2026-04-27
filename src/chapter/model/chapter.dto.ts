@@ -43,6 +43,14 @@ export class TranslationTextSettingsDto {
   fontColor?: string;
 
   @ApiPropertyOptional({
+    description: 'Text color alias (accepted from editor payloads)',
+    example: '#000000',
+  })
+  @IsOptional()
+  @IsString()
+  color?: string;
+
+  @ApiPropertyOptional({
     description: 'Font size in pixels',
     example: '24',
   })
